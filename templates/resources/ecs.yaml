@@ -1,0 +1,197 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >-
+  ECS demo
+
+Parameters:
+  EnvironmentName:
+    Type: String
+
+  ApplicationName:
+    Type: String
+
+  ECRAccount:
+    Type: String
+    Default: '980364033403'
+    AllowedPattern: ^\d{12}$
+
+  ImageTag:
+    Type: String
+
+  ImageName:
+    Type: String
+
+  ContainerPort:
+    Type: Number
+    Default: 5000
+
+  VpcId:
+    Type: String
+    Default: vpc-7e3f6e1a
+
+Resources:
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${EnvironmentName}-${ApplicationName}
+      Tags:
+        - Key: env
+          Value: !Ref EnvironmentName
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AmazonECSTaskExecutionRolePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            # Allow the ECS Tasks to get ECR authorization tokens
+            - Effect: Allow
+              Action: 
+                - ecr:GetAuthorizationToken
+              Resource: '*'
+            # Allow the ECS Tasks to download images from ECR
+            - Effect: Allow
+              Action:
+                - ecr:BatchCheckLayerAvailability
+                - ecr:GetDownloadUrlForLayer
+                - ecr:BatchGetImage
+              Resource:
+                - !Sub arn:aws:ecr:${AWS::Region}:${ECRAccount}:repository/${ImageName}
+      Tags:
+        - Key: env
+          Value: !Ref EnvironmentName
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AmazonECSTaskRolePolicy
+          PolicyDocument:
+            Statement:
+              # SSM Parameters
+              - Effect: Allow
+                Action: 
+                  - ssm:GetParametersByPath
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/demo/envs/dev
+      Tags:
+        - Key: env
+          Value: !Ref EnvironmentName
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${AWS::StackName}
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      NetworkMode: awsvpc
+      Cpu: '256'
+      Memory: '512'
+      ContainerDefinitions:
+        # Main application
+        - Name: !Ref ApplicationName
+          Essential: 'true'
+          Image: !Sub ${ECRAccount}.dkr.ecr.${AWS::Region}.${AWS::URLSuffix}/${ImageName}:${ImageTag}
+          Cpu: '256'
+          Memory: '512'
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          Environment:
+            - Name: SSM_PREFIXES
+              Value: !Sub >-
+                /
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+      Tags:
+        - Key: env
+          Value: !Ref EnvironmentName
+        - Key: component
+          Value: web
+
+  # RecordSetGroup:
+  #   Type: AWS::Route53::RecordSetGroup
+  #   Condition: DnsEnabled
+  #   Properties:
+  #     HostedZoneId: !Ref HostedZoneId
+  #     RecordSets:
+  #       - Name: !Sub ${DomainPrefix}${DomainSuffix}.
+  #         Type: A
+  #         AliasTarget:
+  #           HostedZoneId: !GetAtt LoadBalancer.Outputs.CanonicalHostedZoneID
+  #           DNSName: !GetAtt LoadBalancer.Outputs.DNSName
+  #         Weight: 1
+  #         SetIdentifier: ecs
+
+  ServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupDescription: Access to the ECS hosts and the tasks/containers that run on them
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          Description: Only allow inbound access to ECS
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          Description: HTTPS traffic to anywhere
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          Description: HTTP traffic to anywhere
+      Tags:
+        - Key: Name
+          Value: !Ref AWS::StackName
+        - Key: env
+          Value: !Ref EnvironmentName
+
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref Cluster
+      EnableExecuteCommand: true
+      DesiredCount: 1
+      TaskDefinition: !Ref TaskDefinition
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIP: ENABLED
+          SecurityGroups:
+            - !Ref ServiceSecurityGroup
+          Subnets:
+            - subnet-cba2c5f6
+            - subnet-ba31ece2
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      Tags:
+        - Key: env
+          Value: !Ref EnvironmentName
+        - Key: component
+          Value: web

@@ -1,0 +1,17 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >-
+  A Parameter
+
+Parameters:
+  EnvironmentName:
+    Type: String
+
+Resources:
+  value:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Description: Some Value describing an environment
+      Name: !Sub /demo/envs/${EnvironmentName}
+      Type: String
+      Value: !Sub ${EnvironmentName}

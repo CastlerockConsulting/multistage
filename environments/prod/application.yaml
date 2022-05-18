@@ -1,0 +1,30 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >-
+  ECS demo
+
+Parameters:
+  TemplatePath:
+    Type: String
+    Default: cf-castlerock
+  EnvironmentName:
+    Type: String
+    Default: prod
+
+Resources:
+  parameter:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${TemplatePath}/templates/resources/ssmparam.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+
+  ecs:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://s3.amazonaws.com/${TemplatePath}/templates/resources/ecs.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ApplicationName: application
+        ImageTag: !Ref EnvironmentName
+        ImageName: shiftenterdemo
